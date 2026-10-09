@@ -21,6 +21,12 @@ const userSchema = new mongoose.Schema({
     select: false
     // it will hide this field in a general search using find/findone
   },
+  systemUser: {
+    type: Boolean,
+    default: false,
+    immutable: true,
+    select: false
+  }
 },{
   timestamps: true
   // keeps the record of when user is created and updated
