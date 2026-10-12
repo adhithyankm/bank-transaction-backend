@@ -93,20 +93,23 @@ async function createTransaction(req, res) {
       message: `Insufficient balance. Current balance is ${balance}`
     })
   }
-
+  let transaction
+  try {
   /**
    * 5. Create transaction (PENDING)
    */
   const session = await mongoose.startSession()
   session.startTransaction()
   // session groups all the operations below into a single transaction. If any of them fail, none of them will be committed to the database.
-  const transaction = await transactionModel.create({
+  
+  // we do not create the transaction in the DB, only in the client server, so we do not need to check for idempotency key here. The system user is the only one who can create initial funds transactions, and they are not allowed to create multiple transactions with the same idempotency key.
+  transaction = (await transactionModel.create([{
     fromAccount,
     toAccount,
     amount,
     idempotencyKey,
     status: "PENDING"
-  }, { session })
+  }], { session }))[0]
   // starting a session alone does not a trasaction ,we need to pass the session to each operation that we want to be part of the transaction. In this case, we are passing the session to the create operations for the ledger entries and the save operation for the transaction.
   const debitLedgerEntry = await ledgerModel.create([{
     account: fromAccount,
@@ -115,6 +118,10 @@ async function createTransaction(req, res) {
     type: "DEBIT"
   }], { session })
 
+  await (() => {
+    return new Promise((resolve) => setTimeout(resolve, 15 * 1000))
+  })()
+
   const creditLedgerEntry = await ledgerModel.create([{
     account: toAccount,
     amount: amount,
@@ -122,11 +129,20 @@ async function createTransaction(req, res) {
     type: "CREDIT"
   }], { session })
 
-  transaction.status = "COMPLETED"
-  await transaction.save({ session })
+  await transactionModel.findOneAndUpdate(
+    { _id: transaction._id },
+    { status: "COMPLETED" },
+    { session }
+  )
 
   await session.commitTransaction()
   session.endSession()
+} catch (error) {
+  return res.status(400).json({
+    message: "Transaction is pending due to some error, please try again later",
+    error: error.message
+  })
+}
   /**
    * 10. Send email notification
    */
